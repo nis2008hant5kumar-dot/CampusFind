@@ -1,0 +1,90 @@
+export const mockStaffReports = [
+  {
+    id: 'CF-2041',
+    itemName: 'Silver wireless earbuds case',
+    type: 'Found',
+    category: 'Electronics',
+    location: 'Library courtyard',
+    dateReported: '2026-10-16',
+    reviewStatus: 'Pending review',
+    description:
+      'A small silver earbuds charging case was found near a seating area. No identifying marks are included in this demo description.',
+  },
+  {
+    id: 'CF-2040',
+    itemName: 'Navy canvas tote bag',
+    type: 'Lost',
+    category: 'Bags & Personal Items',
+    location: 'Academic block walkway',
+    dateReported: '2026-10-15',
+    reviewStatus: 'Pending review',
+    description:
+      'A navy canvas tote bag was last seen on campus. The report does not include personal contents or contact details.',
+  },
+  {
+    id: 'CF-2039',
+    itemName: 'Green grid notebook',
+    type: 'Lost',
+    category: 'Books & Stationery',
+    location: 'Learning commons',
+    dateReported: '2026-10-15',
+    reviewStatus: 'Approved',
+    description:
+      'A medium-sized notebook with a green cover and graph paper. This is fictional example data for the dashboard.',
+  },
+  {
+    id: 'CF-2038',
+    itemName: 'Single brass key',
+    type: 'Found',
+    category: 'Keys',
+    location: 'Sports complex entrance',
+    dateReported: '2026-10-14',
+    reviewStatus: 'Pending review',
+    description:
+      'One brass-colored key was found near a campus entrance. No key tag or identifying details are shown.',
+  },
+  {
+    id: 'CF-2037',
+    itemName: 'Black laptop power adapter',
+    type: 'Lost',
+    category: 'Electronics',
+    location: 'Engineering block study area',
+    dateReported: '2026-10-13',
+    reviewStatus: 'Dismissed',
+    description:
+      'A black laptop power adapter with a long cable. The report is a fictional example and includes no owner information.',
+  },
+  {
+    id: 'CF-2036',
+    itemName: 'Blue insulated bottle',
+    type: 'Found',
+    category: 'Other',
+    location: 'Student centre vicinity',
+    dateReported: '2026-10-12',
+    reviewStatus: 'Pending review',
+    description:
+      'A reusable blue bottle was found in a shared campus area. No brand or personal markings are specified.',
+  },
+  {
+    id: 'CF-2035',
+    itemName: 'Brown card holder',
+    type: 'Lost',
+    category: 'Cards & Wallets',
+    location: 'Central academic area',
+    dateReported: '2026-10-11',
+    reviewStatus: 'Approved',
+    description:
+      'A slim brown card holder. Any identification cards or private details are intentionally omitted.',
+  },
+  {
+    id: 'CF-2034',
+    itemName: 'Paperback course book',
+    type: 'Found',
+    category: 'Books & Stationery',
+    location: 'Library study floor',
+    dateReported: '2026-10-10',
+    reviewStatus: 'Dismissed',
+    description:
+      'A paperback course book was left on a shared study table. This sample record is for interface demonstration only.',
+  },
+]
