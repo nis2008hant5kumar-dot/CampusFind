@@ -127,7 +127,7 @@ function ItemCard({ item, onSelect }) {
       className="browse-item-card"
       type="button"
       onClick={() => onSelect(item)}
-      aria-label={`View details for ${item.name}, ${item.status.toLowerCase()}, ${item.category}`}
+      aria-label={`View details for ${item.name}, ${item.status.toLowerCase()}, ${item.customCategory ? `Other (${item.customCategory})` : item.category}`}
     >
       <span className={`item-illustration item-illustration-${visual}`}>
         <ItemIllustration type={visual} />
@@ -140,7 +140,7 @@ function ItemCard({ item, onSelect }) {
           <span className="item-card-time">{reportedDate}</span>
         </span>
         <span className="item-card-name">{item.name}</span>
-        <span className="item-card-category">{item.category}</span>
+        <span className="item-card-category">{item.customCategory ? `Other (${item.customCategory})` : item.category}</span>
         <span className="item-card-description">{item.description}</span>
         <span className="item-card-location">
           <span aria-hidden="true">⌖</span>
@@ -199,10 +199,16 @@ function ItemDetailsDialog({ item, onClose }) {
             <span className={`item-status item-status-${item.status.toLowerCase()}`}>
               {item.status}
             </span>
-            <span className="item-card-category">{item.category}</span>
+            <span className="item-card-category">{item.customCategory ? `Other (${item.customCategory})` : item.category}</span>
           </div>
           <p className="item-dialog-description">{item.description}</p>
           <dl className="item-dialog-meta">
+            {item.customCategory && (
+              <div>
+                <dt>Specified category</dt>
+                <dd>{item.customCategory}</dd>
+              </div>
+            )}
             <div>
               <dt>Approximate location</dt>
               <dd>{item.location}</dd>
@@ -314,7 +320,7 @@ function BrowseItems() {
   const filteredItems = items.filter((item) => {
     const searchText = search.trim().toLocaleLowerCase()
     const searchableText =
-      `${item.name} ${item.description} ${item.category} ${item.location}`.toLocaleLowerCase()
+      `${item.name} ${item.description} ${item.category} ${item.customCategory || ''} ${item.location}`.toLocaleLowerCase()
 
     return !searchText || searchableText.includes(searchText)
   })

@@ -9,6 +9,11 @@ export const mockStaffReports = [
     reviewStatus: 'Pending review',
     description:
       'A small silver earbuds charging case was found near a seating area. No identifying marks are included in this demo description.',
+    dismissReason: null,
+    dismissedAt: null,
+    warningIssued: false,
+    warningReason: null,
+    warnedAt: null,
   },
   {
     id: 'CF-2040',
@@ -20,6 +25,11 @@ export const mockStaffReports = [
     reviewStatus: 'Pending review',
     description:
       'A navy canvas tote bag was last seen on campus. The report does not include personal contents or contact details.',
+    dismissReason: null,
+    dismissedAt: null,
+    warningIssued: false,
+    warningReason: null,
+    warnedAt: null,
   },
   {
     id: 'CF-2039',
@@ -31,6 +41,11 @@ export const mockStaffReports = [
     reviewStatus: 'Approved',
     description:
       'A medium-sized notebook with a green cover and graph paper. This is fictional example data for the dashboard.',
+    dismissReason: null,
+    dismissedAt: null,
+    warningIssued: false,
+    warningReason: null,
+    warnedAt: null,
   },
   {
     id: 'CF-2038',
@@ -42,6 +57,11 @@ export const mockStaffReports = [
     reviewStatus: 'Pending review',
     description:
       'One brass-colored key was found near a campus entrance. No key tag or identifying details are shown.',
+    dismissReason: null,
+    dismissedAt: null,
+    warningIssued: false,
+    warningReason: null,
+    warnedAt: null,
   },
   {
     id: 'CF-2037',
@@ -53,6 +73,11 @@ export const mockStaffReports = [
     reviewStatus: 'Dismissed',
     description:
       'A black laptop power adapter with a long cable. The report is a fictional example and includes no owner information.',
+    dismissReason: 'Investigation found no issue (item already recovered by owner)',
+    dismissedAt: '2026-10-13T14:20:00.000Z',
+    warningIssued: false,
+    warningReason: null,
+    warnedAt: null,
   },
   {
     id: 'CF-2036',
@@ -64,6 +89,11 @@ export const mockStaffReports = [
     reviewStatus: 'Pending review',
     description:
       'A reusable blue bottle was found in a shared campus area. No brand or personal markings are specified.',
+    dismissReason: null,
+    dismissedAt: null,
+    warningIssued: false,
+    warningReason: null,
+    warnedAt: null,
   },
   {
     id: 'CF-2035',
@@ -75,6 +105,11 @@ export const mockStaffReports = [
     reviewStatus: 'Approved',
     description:
       'A slim brown card holder. Any identification cards or private details are intentionally omitted.',
+    dismissReason: null,
+    dismissedAt: null,
+    warningIssued: false,
+    warningReason: null,
+    warnedAt: null,
   },
   {
     id: 'CF-2034',
@@ -86,5 +121,10 @@ export const mockStaffReports = [
     reviewStatus: 'Dismissed',
     description:
       'A paperback course book was left on a shared study table. This sample record is for interface demonstration only.',
+    dismissReason: 'Investigation found no issue (claimed by student with verified ID)',
+    dismissedAt: '2026-10-10T16:45:00.000Z',
+    warningIssued: false,
+    warningReason: null,
+    warnedAt: null,
   },
 ]

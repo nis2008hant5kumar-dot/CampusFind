@@ -7,6 +7,7 @@ const initialValues = {
   type: 'Lost',
   name: '',
   category: '',
+  customCategory: '',
   description: '',
   date: '',
   location: '',
@@ -37,11 +38,20 @@ function ReportItem({ onCancel }) {
 
   const updateValue = (event) => {
     const { name, value } = event.target
-    setValues((current) => ({ ...current, [name]: value }))
+    setValues((current) => {
+      const next = { ...current, [name]: value }
+      if (name === 'category' && value !== 'Other') {
+        next.customCategory = ''
+      }
+      return next
+    })
     setConfirmation(null)
     setSubmitError('')
     if (errors[name]) {
       setErrors((current) => ({ ...current, [name]: '' }))
+    }
+    if (name === 'category' && value !== 'Other' && errors.customCategory) {
+      setErrors((current) => ({ ...current, customCategory: '' }))
     }
   }
 
@@ -80,7 +90,15 @@ function ReportItem({ onCancel }) {
   const validate = () => {
     const nextErrors = {}
     if (!values.name.trim()) nextErrors.name = 'Enter an item name.'
-    if (!values.category) nextErrors.category = 'Choose a category.'
+    if (!values.category) {
+      nextErrors.category = 'Choose a category.'
+    } else if (values.category === 'Other') {
+      if (!values.customCategory || !values.customCategory.trim()) {
+        nextErrors.customCategory = 'Please specify a category.'
+      } else if (values.customCategory.trim().length > 50) {
+        nextErrors.customCategory = 'Specified category must be 50 characters or fewer.'
+      }
+    }
     if (!values.description.trim()) {
       nextErrors.description = 'Add a short description.'
     }
@@ -106,7 +124,7 @@ function ReportItem({ onCancel }) {
     setSubmitError('')
 
     if (Object.keys(nextErrors).length > 0 || photoError) {
-      const firstInvalidField = ['name', 'category', 'description', 'date', 'location']
+      const firstInvalidField = ['name', 'category', 'customCategory', 'description', 'date', 'location']
         .find((field) => nextErrors[field])
       const invalidField = firstInvalidField
         ? formRef.current?.querySelector(`[name="${firstInvalidField}"]`)
@@ -122,7 +140,17 @@ function ReportItem({ onCancel }) {
       const response = await fetch(`${apiBaseUrl}/api/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
+        body: JSON.stringify({
+          type: values.type,
+          name: values.name.trim(),
+          category: values.category,
+          description: values.description.trim(),
+          date: values.date,
+          location: values.location.trim(),
+          ...(values.category === 'Other' && values.customCategory.trim()
+            ? { customCategory: values.customCategory.trim() }
+            : {}),
+        }),
       })
       let payload
       try {
@@ -135,11 +163,11 @@ function ReportItem({ onCancel }) {
         if (payload?.error?.details && typeof payload.error.details === 'object') {
           const serverErrors = Object.fromEntries(
             Object.entries(payload.error.details).filter(([field]) =>
-              ['type', 'name', 'category', 'description', 'date', 'location'].includes(field),
+              ['type', 'name', 'category', 'customCategory', 'description', 'date', 'location'].includes(field),
             ),
           )
           setErrors(serverErrors)
-          const firstInvalidField = ['name', 'category', 'description', 'date', 'location']
+          const firstInvalidField = ['name', 'category', 'customCategory', 'description', 'date', 'location']
             .find((field) => serverErrors[field])
           formRef.current
             ?.querySelector(`[name="${firstInvalidField || 'name'}"]`)
@@ -257,6 +285,37 @@ function ReportItem({ onCancel }) {
                 <p className="field-error" id="report-category-error">{errors.category}</p>
               )}
             </div>
+
+            {values.category === 'Other' && (
+              <div className="report-field report-field-full">
+                <label htmlFor="report-custom-category">
+                  Specify category <span aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="report-custom-category"
+                  name="customCategory"
+                  type="text"
+                  value={values.customCategory}
+                  onChange={updateValue}
+                  placeholder="e.g. Sports Equipment"
+                  maxLength={50}
+                  required
+                  aria-invalid={Boolean(errors.customCategory)}
+                  aria-describedby={[
+                    'report-custom-category-hint',
+                    errors.customCategory ? 'report-custom-category-error' : '',
+                  ].filter(Boolean).join(' ') || undefined}
+                />
+                <p className="field-hint" id="report-custom-category-hint">
+                  Provide a brief, descriptive category for items not covered above.
+                </p>
+                {errors.customCategory && (
+                  <p className="field-error" id="report-custom-category-error">
+                    {errors.customCategory}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="report-field report-field-full">
               <label htmlFor="report-description">Description <span aria-hidden="true">*</span></label>

@@ -751,3 +751,236 @@
     width: 100%;
   }
 }
+
+.staff-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.staff-warning-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid #eadfca;
+  border-radius: 5px;
+  background: #fbf8f1;
+  color: #826531;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.staff-notice-warning {
+  border-color: #eadfca;
+  background: #fdfaf2;
+  color: #7d5e27;
+}
+
+.staff-notice-body strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 750;
+  margin-bottom: 2px;
+}
+
+.staff-notice-body p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.staff-dialog-warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 12px;
+  border: 1px solid #ebdcc5;
+  border-radius: 8px;
+  background: #fdf8ee;
+  color: #7b5b24;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.staff-dialog-warning-banner strong {
+  display: block;
+  margin-bottom: 2px;
+  color: #634617;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.staff-dialog-warning-banner p {
+  margin: 0;
+  font-size: 11px;
+}
+
+.staff-dialog-warning-banner small {
+  display: block;
+  margin-top: 4px;
+  color: #8c7143;
+  font-size: 9.5px;
+}
+
+.staff-dialog-dismiss-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 12px;
+  border: 1px solid #e2dad6;
+  border-radius: 8px;
+  background: #fcf6f4;
+  color: #7a4e43;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.staff-dialog-dismiss-banner strong {
+  display: block;
+  margin-bottom: 2px;
+  color: #663d33;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.staff-dialog-dismiss-banner p {
+  margin: 0;
+  font-size: 11px;
+}
+
+.staff-dialog-dismiss-banner small {
+  display: block;
+  margin-top: 4px;
+  color: #8d665c;
+  font-size: 9.5px;
+}
+
+.staff-action-box {
+  margin-top: 16px;
+  padding: 15px;
+  border: 1px solid #e1e7e2;
+  border-radius: 9px;
+  background: #f9fbf9;
+}
+
+.staff-action-box-warn {
+  border-color: #ebdcc5;
+  background: #fdfaf2;
+}
+
+.staff-action-box-title {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 720;
+  letter-spacing: -0.015em;
+}
+
+.staff-action-box-desc {
+  margin: 0 0 12px;
+  color: #636f6e;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.staff-action-field {
+  margin-bottom: 12px;
+}
+
+.staff-action-field label {
+  display: block;
+  margin-bottom: 5px;
+  color: #4f5b57;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.staff-action-text-input,
+.staff-action-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #cfd7d1;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.45;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.staff-action-text-input:focus,
+.staff-action-textarea:focus {
+  border-color: #4b6b55;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(75, 107, 85, 0.15);
+}
+
+.staff-action-box-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.staff-action-dismiss-confirm {
+  border-color: #875447;
+  background: #875447;
+  color: #fff;
+}
+
+.staff-action-dismiss-confirm:hover:not(:disabled) {
+  background: #73453a;
+}
+
+.staff-action-warn-confirm {
+  border-color: #786442;
+  background: #786442;
+  color: #fff;
+}
+
+.staff-action-warn-confirm:hover:not(:disabled) {
+  background: #645234;
+}
+
+.staff-action-cancel {
+  border-color: #dbe2dc;
+  background: #fff;
+  color: #55625b;
+}
+
+.staff-action-cancel:hover:not(:disabled) {
+  background: #f1f5f2;
+}
+
+.staff-action-error {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border: 1px solid #ebd2cd;
+  border-radius: 6px;
+  background: #fdf5f4;
+  color: #8b3c31;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.staff-dialog-subnote {
+  margin: 4px 0 0;
+  color: #84765d;
+  font-size: 9.5px;
+  line-height: 1.4;
+}
+
+.staff-actions-prompt {
+  margin: 0 0 8px;
+  color: #6a7674;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

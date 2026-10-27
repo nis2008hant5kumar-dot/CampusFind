@@ -1,20 +1,74 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { apiBaseUrl } from '../config/api.js'
 import { mockStaffReports } from '../data/mockStaffReports.js'
 import './StaffDashboard.css'
 
 const reviewStatuses = ['Pending review', 'Approved', 'Dismissed']
 
-function ReportDetailsDialog({ report, warned, onClose, onApprove, onDismiss, onWarn }) {
+function formatDateTime(value) {
+  if (!value) return ''
+  try {
+    return new Intl.DateTimeFormat('en', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'UTC',
+    }).format(new Date(value))
+  } catch {
+    return value
+  }
+}
+
+function formatDate(value) {
+  return new Intl.DateTimeFormat('en', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${value}T00:00:00Z`))
+}
+
+function ReportDetailsDialog({
+  report,
+  isSubmitting,
+  actionError,
+  onClose,
+  onApprove,
+  onDismiss,
+  onWarn,
+}) {
   const dialogRef = useRef(null)
+  const [activeMode, setActiveMode] = useState('view') // 'view' | 'dismiss' | 'warn'
+  const [dismissReason, setDismissReason] = useState('Investigation found no issue')
+  const [warnReason, setWarnReason] = useState(
+    'Inappropriate report: content violates campus reporting guidelines',
+  )
 
   useEffect(() => {
     const dialog = dialogRef.current
     if (report && dialog && !dialog.open) {
+      setActiveMode('view')
+      setDismissReason('Investigation found no issue')
+      setWarnReason('Inappropriate report: content violates campus reporting guidelines')
       dialog.showModal()
     } else if (!report && dialog?.open) {
       dialog.close()
     }
   }, [report])
+
+  const submitDismissal = (e) => {
+    e.preventDefault()
+    if (!report || isSubmitting) return
+    onDismiss(report, dismissReason)
+  }
+
+  const submitWarning = (e) => {
+    e.preventDefault()
+    if (!report || isSubmitting) return
+    onWarn(report, warnReason)
+  }
 
   return (
     <dialog
@@ -34,7 +88,7 @@ function ReportDetailsDialog({ report, warned, onClose, onApprove, onDismiss, on
         <div className="staff-dialog-content">
           <div className="staff-dialog-heading">
             <div>
-              <p className="staff-eyebrow">Mock report · {report.id}</p>
+              <p className="staff-eyebrow">Report · {report.id}</p>
               <h2 id="staff-dialog-title">{report.itemName}</h2>
             </div>
             <button
@@ -47,6 +101,7 @@ function ReportDetailsDialog({ report, warned, onClose, onApprove, onDismiss, on
               <span aria-hidden="true">×</span>
             </button>
           </div>
+
           <div className="staff-dialog-badges">
             <span className={`staff-type-badge staff-type-${report.type.toLowerCase()}`}>
               {report.type}
@@ -54,110 +109,397 @@ function ReportDetailsDialog({ report, warned, onClose, onApprove, onDismiss, on
             <span className={`review-badge review-${report.reviewStatus.toLowerCase().replace(' ', '-')}`}>
               {report.reviewStatus}
             </span>
+            {report.warningIssued && (
+              <span className="staff-warning-badge" title={report.warningReason}>
+                ⚠️ Reporter warned
+              </span>
+            )}
           </div>
+
           <p className="staff-dialog-description">{report.description}</p>
+
           <dl className="staff-detail-list">
             <div><dt>Category</dt><dd>{report.category}</dd></div>
             <div><dt>Approximate campus area</dt><dd>{report.location}</dd></div>
             <div><dt>Date reported</dt><dd>{formatDate(report.dateReported)}</dd></div>
             <div><dt>Report reference</dt><dd>{report.id}</dd></div>
           </dl>
-          <p className="staff-dialog-note">
-            Fictional demonstration record. No student identity, contact details,
-            or precise recovery location is included.
-          </p>
-          {report.reviewStatus === 'Pending review' ? (
-            <div className="staff-dialog-actions" aria-label="Report review actions">
-              {warned && (
-                <p className="staff-warning-notice" role="status" aria-live="polite">
-                  Demo correction notice prepared locally. No student was contacted.
-                </p>
-              )}
-              <div className="staff-dialog-action-buttons">
-                <button className="staff-action staff-action-approve" type="button" onClick={() => onApprove(report)}>
-                  Approve
-                </button>
-                <button className="staff-action staff-action-dismiss" type="button" onClick={() => onDismiss(report)}>
-                  Dismiss
-                </button>
-                <button
-                  className="staff-action staff-action-warn"
-                  type="button"
-                  disabled={warned}
-                  onClick={() => onWarn(report)}
-                >
-                  {warned ? 'Warning previewed' : 'Warn (demo)'}
-                </button>
+
+          {/* Action-related notices & history */}
+          {report.warningIssued && (
+            <div className="staff-dialog-warning-banner" role="status" aria-live="polite">
+              <span className="banner-icon" aria-hidden="true">⚠️</span>
+              <div>
+                <strong>Reporter Warning Issued</strong>
+                <p>{report.warningReason}</p>
+                {report.warnedAt && (
+                  <small>Issued: {formatDateTime(report.warnedAt)}</small>
+                )}
               </div>
             </div>
-          ) : (
-            <p className="staff-reviewed-note">
-              This report has already been reviewed. Review actions are unavailable.
-            </p>
           )}
+
+          {report.reviewStatus === 'Dismissed' && (
+            <div className="staff-dialog-dismiss-banner" role="status" aria-live="polite">
+              <span className="banner-icon" aria-hidden="true">✓</span>
+              <div>
+                <strong>Report Dismissed</strong>
+                <p>{report.dismissReason || 'Investigation found no issue'}</p>
+                {report.dismissedAt && (
+                  <small>Resolved: {formatDateTime(report.dismissedAt)}</small>
+                )}
+              </div>
+            </div>
+          )}
+
+          {actionError && (
+            <div className="staff-action-error" role="alert">
+              <span>{actionError}</span>
+            </div>
+          )}
+
+          {/* Interactive Action Forms or Buttons */}
+          {activeMode === 'dismiss' ? (
+            <form className="staff-action-box" onSubmit={submitDismissal}>
+              <h3 className="staff-action-box-title">Dismiss report (Investigation finds no issue)</h3>
+              <p className="staff-action-box-desc">
+                Dismissing this report records that staff investigated the submission and found no issue.
+                The report status will update to <strong>Dismissed</strong>.
+              </p>
+              <div className="staff-action-field">
+                <label htmlFor="dismiss-reason-input">Resolution note / reason</label>
+                <input
+                  id="dismiss-reason-input"
+                  className="staff-action-text-input"
+                  type="text"
+                  maxLength={500}
+                  value={dismissReason}
+                  onChange={(e) => setDismissReason(e.target.value)}
+                  placeholder="e.g. Investigation found no issue"
+                  required
+                />
+              </div>
+              <div className="staff-action-box-actions">
+                <button
+                  className="staff-action staff-action-dismiss-confirm"
+                  type="submit"
+                  disabled={isSubmitting || !dismissReason.trim()}
+                >
+                  {isSubmitting ? 'Dismissing…' : 'Confirm Dismissal'}
+                </button>
+                <button
+                  className="staff-action staff-action-cancel"
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setActiveMode('view')}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : activeMode === 'warn' ? (
+            <form className="staff-action-box staff-action-box-warn" onSubmit={submitWarning}>
+              <h3 className="staff-action-box-title">Warn reporter (Inappropriate report)</h3>
+              <p className="staff-action-box-desc">
+                Use this action when a submission contains inappropriate content, false information,
+                or violates campus policies. A formal warning notice will be attached to this report.
+              </p>
+              <div className="staff-action-field">
+                <label htmlFor="warn-reason-input">Warning explanation</label>
+                <textarea
+                  id="warn-reason-input"
+                  className="staff-action-textarea"
+                  rows={3}
+                  maxLength={500}
+                  value={warnReason}
+                  onChange={(e) => setWarnReason(e.target.value)}
+                  placeholder="Describe why this report is inappropriate..."
+                  required
+                />
+              </div>
+              <p className="staff-dialog-subnote">
+                Demo notice: Warning record is logged in the system. No student email is dispatched in this demo.
+              </p>
+              <div className="staff-action-box-actions">
+                <button
+                  className="staff-action staff-action-warn-confirm"
+                  type="submit"
+                  disabled={isSubmitting || !warnReason.trim()}
+                >
+                  {isSubmitting ? 'Issuing warning…' : 'Issue Warning Notice'}
+                </button>
+                <button
+                  className="staff-action staff-action-cancel"
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setActiveMode('view')}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="staff-dialog-actions" aria-label="Report review actions">
+              {report.reviewStatus === 'Pending review' ? (
+                <>
+                  <p className="staff-actions-prompt">Staff actions for this report:</p>
+                  <div className="staff-dialog-action-buttons">
+                    <button
+                      className="staff-action staff-action-approve"
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => onApprove(report)}
+                    >
+                      {isSubmitting ? 'Approving…' : 'Approve'}
+                    </button>
+                    <button
+                      className="staff-action staff-action-dismiss"
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => setActiveMode('dismiss')}
+                    >
+                      Dismiss (no issue)
+                    </button>
+                    <button
+                      className="staff-action staff-action-warn"
+                      type="button"
+                      disabled={isSubmitting || report.warningIssued}
+                      onClick={() => setActiveMode('warn')}
+                    >
+                      {report.warningIssued ? 'Reporter warned' : 'Warn reporter (inappropriate)'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="staff-dialog-action-buttons">
+                  <p className="staff-reviewed-note">
+                    This report has been reviewed ({report.reviewStatus.toLowerCase()}).
+                  </p>
+                  {!report.warningIssued && (
+                    <button
+                      className="staff-action staff-action-warn"
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => setActiveMode('warn')}
+                    >
+                      Warn reporter (inappropriate)
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <p className="staff-dialog-note">
+            CampusFind Staff Tools · Limitation: Role-based staff authorization is not yet implemented.
+            All actions operate on demonstration data without cryptographic staff verification.
+          </p>
         </div>
       )}
     </dialog>
   )
 }
 
-function formatDate(value) {
-  return new Intl.DateTimeFormat('en', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(new Date(`${value}T00:00:00Z`))
-}
-
 function StaffDashboard() {
   const [reports, setReports] = useState(mockStaffReports)
+  const [isLoading, setIsLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
   const [selectedReport, setSelectedReport] = useState(null)
-  const [warnedReports, setWarnedReports] = useState(() => new Set())
-  const [notice, setNotice] = useState('')
+  const [feedbackNotice, setFeedbackNotice] = useState(null)
+  const [actionError, setActionError] = useState('')
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false)
+
+  // Fetch reports from backend API on mount
+  useEffect(() => {
+    let active = true
+    const fetchReports = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/reports`)
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        const data = await response.json()
+        if (active && data.status === 'ok' && Array.isArray(data.reports)) {
+          setReports(data.reports)
+        }
+      } catch {
+        // Fall back to local mock data gracefully if backend is offline
+      } finally {
+        if (active) setIsLoading(false)
+      }
+    }
+
+    fetchReports()
+    return () => {
+      active = false
+    }
+  }, [])
 
   const filteredReports = useMemo(() => {
     const query = search.trim().toLocaleLowerCase()
     return reports.filter((report) => (
-      (!query || report.itemName.toLocaleLowerCase().includes(query)) &&
+      (!query ||
+        report.itemName.toLocaleLowerCase().includes(query) ||
+        report.id.toLocaleLowerCase().includes(query) ||
+        report.location.toLocaleLowerCase().includes(query)) &&
       (typeFilter === 'All' || report.type === typeFilter) &&
       (statusFilter === 'All' || report.reviewStatus === statusFilter)
     ))
   }, [reports, search, statusFilter, typeFilter])
 
-  const counts = reports.reduce((summary, report) => {
-    summary.total += 1
-    if (report.reviewStatus === 'Pending review') summary.pending += 1
-    if (report.reviewStatus === 'Approved') summary.approved += 1
-    if (report.reviewStatus === 'Dismissed') summary.dismissed += 1
-    return summary
-  }, { total: 0, pending: 0, approved: 0, dismissed: 0 })
-
-  const closeDetails = () => setSelectedReport(null)
-
-  const reviewReport = (report, nextStatus) => {
-    if (report.reviewStatus !== 'Pending review') return
-    const action = nextStatus === 'Approved' ? 'approve' : 'dismiss'
-    const confirmation = window.confirm(
-      `Confirm ${action} for "${report.itemName}" (${report.id})? This demo change only updates this page.`,
+  const counts = useMemo(() => {
+    return reports.reduce(
+      (summary, report) => {
+        summary.total += 1
+        if (report.reviewStatus === 'Pending review') summary.pending += 1
+        if (report.reviewStatus === 'Approved') summary.approved += 1
+        if (report.reviewStatus === 'Dismissed') summary.dismissed += 1
+        if (report.warningIssued) summary.warned += 1
+        return summary
+      },
+      { total: 0, pending: 0, approved: 0, dismissed: 0, warned: 0 },
     )
-    if (!confirmation) return
+  }, [reports])
 
-    setReports((current) => current.map((entry) => (
-      entry.id === report.id && entry.reviewStatus === 'Pending review'
-        ? { ...entry, reviewStatus: nextStatus }
-        : entry
-    )))
-    setNotice(`Demo report ${report.id} marked ${nextStatus.toLowerCase()}. This change is not saved.`)
-    closeDetails()
+  const closeDetails = () => {
+    setSelectedReport(null)
+    setActionError('')
   }
 
-  const previewWarning = (report) => {
-    if (report.reviewStatus !== 'Pending review' || warnedReports.has(report.id)) return
-    setWarnedReports((current) => new Set(current).add(report.id))
+  // Staff Action 1: Dismiss a report when investigation finds no issue
+  const handleDismissReport = async (report, reason) => {
+    setIsSubmittingAction(true)
+    setActionError('')
+    const trimmedReason = reason.trim() || 'Investigation found no issue'
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/reports/${encodeURIComponent(report.id)}/dismiss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: trimmedReason }),
+      })
+
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(payload?.error?.message || `Dismissal failed (HTTP ${response.status})`)
+      }
+
+      const updatedReport = payload.report
+      setReports((current) => current.map((r) => (r.id === report.id ? updatedReport : r)))
+      setSelectedReport(updatedReport)
+      setFeedbackNotice({
+        type: 'success',
+        title: 'Report Dismissed',
+        message: `Report ${report.id} (${report.itemName}) has been dismissed: "${trimmedReason}".`,
+      })
+    } catch (err) {
+      // Local fallback if API is unreachable
+      const fallbackReport = {
+        ...report,
+        reviewStatus: 'Dismissed',
+        dismissReason: trimmedReason,
+        dismissedAt: new Date().toISOString(),
+      }
+      setReports((current) => current.map((r) => (r.id === report.id ? fallbackReport : r)))
+      setSelectedReport(fallbackReport)
+      setFeedbackNotice({
+        type: 'success',
+        title: 'Report Dismissed (Demo local state)',
+        message: `Report ${report.id} (${report.itemName}) marked dismissed: "${trimmedReason}". (${err.message})`,
+      })
+    } finally {
+      setIsSubmittingAction(false)
+    }
+  }
+
+  // Staff Action 2: Warn reporter when a report is inappropriate
+  const handleWarnReporter = async (report, reason) => {
+    setIsSubmittingAction(true)
+    setActionError('')
+    const trimmedReason =
+      reason.trim() || 'Inappropriate report: content violates campus reporting guidelines'
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/reports/${encodeURIComponent(report.id)}/warn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: trimmedReason }),
+      })
+
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(payload?.error?.message || `Warning failed (HTTP ${response.status})`)
+      }
+
+      const updatedReport = payload.report
+      setReports((current) => current.map((r) => (r.id === report.id ? updatedReport : r)))
+      setSelectedReport(updatedReport)
+      setFeedbackNotice({
+        type: 'warning',
+        title: 'Reporter Warning Issued',
+        message: `Warning issued to reporter for report ${report.id}: "${trimmedReason}".`,
+      })
+    } catch (err) {
+      // Local fallback if API is unreachable
+      const fallbackReport = {
+        ...report,
+        warningIssued: true,
+        warningReason: trimmedReason,
+        warnedAt: new Date().toISOString(),
+      }
+      setReports((current) => current.map((r) => (r.id === report.id ? fallbackReport : r)))
+      setSelectedReport(fallbackReport)
+      setFeedbackNotice({
+        type: 'warning',
+        title: 'Reporter Warning Issued (Demo local state)',
+        message: `Warning issued to reporter for report ${report.id}: "${trimmedReason}". (${err.message})`,
+      })
+    } finally {
+      setIsSubmittingAction(false)
+    }
+  }
+
+  // Staff Action: Approve report
+  const handleApproveReport = async (report) => {
+    setIsSubmittingAction(true)
+    setActionError('')
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/reports/${encodeURIComponent(report.id)}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(payload?.error?.message || `Approval failed (HTTP ${response.status})`)
+      }
+
+      const updatedReport = payload.report
+      setReports((current) => current.map((r) => (r.id === report.id ? updatedReport : r)))
+      setSelectedReport(updatedReport)
+      setFeedbackNotice({
+        type: 'success',
+        title: 'Report Approved',
+        message: `Report ${report.id} (${report.itemName}) has been approved and verified.`,
+      })
+    } catch (err) {
+      const fallbackReport = {
+        ...report,
+        reviewStatus: 'Approved',
+      }
+      setReports((current) => current.map((r) => (r.id === report.id ? fallbackReport : r)))
+      setSelectedReport(fallbackReport)
+      setFeedbackNotice({
+        type: 'success',
+        title: 'Report Approved (Demo local state)',
+        message: `Report ${report.id} marked approved. (${err.message})`,
+      })
+    } finally {
+      setIsSubmittingAction(false)
+    }
   }
 
   const clearFilters = () => {
@@ -173,60 +515,85 @@ function StaffDashboard() {
           <p className="staff-eyebrow">CampusFind · Staff tools</p>
           <h1 id="staff-title">Report review dashboard</h1>
           <p>
-            Review campus lost-and-found reports and manage their demo review status.
+            Review campus lost-and-found reports, dismiss unneeded records, and issue warnings for inappropriate submissions.
           </p>
         </div>
-        <span className="staff-demo-label">Demo dashboard · no staff authentication</span>
+        <span className="staff-demo-label">Demo dashboard · no staff authorization enforced</span>
       </section>
 
       <section className="staff-summary" aria-label="Report summary">
         <article className="staff-summary-card">
           <span className="summary-label">Total reports</span>
           <strong>{counts.total}</strong>
-          <span className="summary-detail">Fictional demo records</span>
+          <span className="summary-detail">Demo records</span>
         </article>
         <article className="staff-summary-card summary-pending">
           <span className="summary-label">Pending review</span>
           <strong>{counts.pending}</strong>
-          <span className="summary-detail">Awaiting a demo decision</span>
+          <span className="summary-detail">Awaiting staff action</span>
         </article>
         <article className="staff-summary-card summary-approved">
           <span className="summary-label">Approved</span>
           <strong>{counts.approved}</strong>
-          <span className="summary-detail">Marked approved in this session</span>
+          <span className="summary-detail">Verified campus reports</span>
         </article>
         <article className="staff-summary-card summary-dismissed">
           <span className="summary-label">Dismissed</span>
           <strong>{counts.dismissed}</strong>
-          <span className="summary-detail">Marked dismissed in this session</span>
+          <span className="summary-detail">No issue found / closed</span>
         </article>
       </section>
+
+      {/* Confirmation / Feedback notice */}
+      {feedbackNotice && (
+        <div
+          className={`staff-notice staff-notice-${feedbackNotice.type || 'info'}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="staff-notice-body">
+            <strong>{feedbackNotice.title}</strong>
+            <p>{feedbackNotice.message}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFeedbackNotice(null)}
+            aria-label="Dismiss feedback message"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+      )}
 
       <section className="staff-reports-panel" aria-labelledby="reports-heading">
         <div className="staff-panel-heading">
           <div>
             <h2 id="reports-heading">Item reports</h2>
-            <p>Search and filter the fictional reports available in this demo.</p>
+            <p>Search, review, dismiss records, or warn reporters when inappropriate.</p>
           </div>
           <span className="staff-result-count" aria-live="polite">
-            {filteredReports.length} {filteredReports.length === 1 ? 'report' : 'reports'}
+            {isLoading ? 'Loading reports…' : `${filteredReports.length} ${filteredReports.length === 1 ? 'report' : 'reports'}`}
           </span>
         </div>
 
         <div className="staff-controls">
           <div className="staff-search-control">
-            <label htmlFor="staff-search">Search item name</label>
+            <label htmlFor="staff-search">Search item, ID or location</label>
             <input
               id="staff-search"
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="e.g. notebook"
+              placeholder="e.g. notebook, CF-2041, library"
             />
           </div>
           <div className="staff-filter-control">
             <label htmlFor="staff-type-filter">Report type</label>
-            <select id="staff-type-filter" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+            <select
+              id="staff-type-filter"
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value)}
+            >
               <option value="All">All types</option>
               <option value="Lost">Lost</option>
               <option value="Found">Found</option>
@@ -234,9 +601,17 @@ function StaffDashboard() {
           </div>
           <div className="staff-filter-control">
             <label htmlFor="staff-status-filter">Review status</label>
-            <select id="staff-status-filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <select
+              id="staff-status-filter"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
               <option value="All">All statuses</option>
-              {reviewStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+              {reviewStatuses.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
             </select>
           </div>
           <button
@@ -248,15 +623,6 @@ function StaffDashboard() {
             Clear filters
           </button>
         </div>
-
-        {notice && (
-          <div className="staff-notice" role="status" aria-live="polite">
-            <span>{notice}</span>
-            <button type="button" onClick={() => setNotice('')} aria-label="Dismiss dashboard message">
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
-        )}
 
         {filteredReports.length > 0 ? (
           <div className="staff-table-wrap">
@@ -280,27 +646,36 @@ function StaffDashboard() {
                       <span className="staff-item-reference">{report.id}</span>
                     </td>
                     <td data-label="Report">
-                      <span className={`staff-type-badge staff-type-${report.type.toLowerCase()}`}>{report.type}</span>
+                      <span className={`staff-type-badge staff-type-${report.type.toLowerCase()}`}>
+                        {report.type}
+                      </span>
                     </td>
                     <td data-label="Category">{report.category}</td>
                     <td data-label="Approximate location">{report.location}</td>
                     <td data-label="Date reported">{formatDate(report.dateReported)}</td>
                     <td data-label="Review status">
-                      <span className={`review-badge review-${report.reviewStatus.toLowerCase().replace(' ', '-')}`}>
-                        {report.reviewStatus}
-                      </span>
-                      {warnedReports.has(report.id) && (
-                        <span className="staff-warning-state">Warning previewed</span>
-                      )}
+                      <div className="staff-status-cell">
+                        <span className={`review-badge review-${report.reviewStatus.toLowerCase().replace(' ', '-')}`}>
+                          {report.reviewStatus}
+                        </span>
+                        {report.warningIssued && (
+                          <span
+                            className="staff-warning-state"
+                            title={`Warning: ${report.warningReason}`}
+                          >
+                            ⚠️ Reporter warned
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td data-label="Actions">
                       <button
                         className="staff-view-button"
                         type="button"
                         onClick={() => setSelectedReport(report)}
-                        aria-label={`View details for ${report.itemName}, report ${report.id}`}
+                        aria-label={`View details and actions for ${report.itemName}, report ${report.id}`}
                       >
-                        View details
+                        Review / Action
                       </button>
                     </td>
                   </tr>
@@ -321,17 +696,18 @@ function StaffDashboard() {
       </section>
 
       <p className="staff-data-note">
-        Dashboard actions update fictional data in this page only. No reports are
-        loaded from or saved to a database.
+        Staff action endpoints (dismiss, warn, approve) operate in demonstration mode.
+        Full role-based staff authorization and database persistence are pending future production integration.
       </p>
 
       <ReportDetailsDialog
         report={selectedReport}
-        warned={selectedReport ? warnedReports.has(selectedReport.id) : false}
+        isSubmitting={isSubmittingAction}
+        actionError={actionError}
         onClose={closeDetails}
-        onApprove={(report) => reviewReport(report, 'Approved')}
-        onDismiss={(report) => reviewReport(report, 'Dismissed')}
-        onWarn={previewWarning}
+        onApprove={handleApproveReport}
+        onDismiss={handleDismissReport}
+        onWarn={handleWarnReporter}
       />
     </div>
   )
