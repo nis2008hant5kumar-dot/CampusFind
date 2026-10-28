@@ -41,10 +41,10 @@
 .staff-demo-label {
   flex: 0 0 auto;
   padding: 8px 11px;
-  border: 1px solid #e8ddc7;
+  border: 1px solid #d5e4d8;
   border-radius: 7px;
-  background: #fbf8f1;
-  color: #786442;
+  background: #f2f8f3;
+  color: #42634a;
   font-size: 11px;
   font-weight: 700;
 }
@@ -349,6 +349,30 @@
   margin-top: 5px;
   color: #816332;
   font-size: 9px;
+}
+
+.staff-load-state,
+.staff-load-error {
+  padding: 38px 20px;
+  text-align: center;
+}
+
+.staff-load-state {
+  color: #68756f;
+  font-size: 13px;
+}
+
+.staff-load-error h3 {
+  margin: 0 0 7px;
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.staff-load-error p {
+  margin: 0 0 16px;
+  color: #778184;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .staff-empty-state {

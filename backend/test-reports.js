@@ -1,7 +1,15 @@
 // Test script for Staff Report Actions API & Task 7 Local Staff Authentication
 const http = require('http')
 const { spawn } = require('child_process')
-const { hashPassword, createSignedToken } = require('./src/auth')
+const crypto = require('crypto')
+const {
+  hashPassword,
+  createSignedToken,
+  createStaffAuthMiddleware,
+  SessionManager,
+  validateAuthConfig,
+  verifyPassword,
+} = require('./src/auth')
 
 async function runTests() {
   const results = []
@@ -11,6 +19,131 @@ async function runTests() {
     }
     results.push(`✓ ${message}`)
   }
+
+  const testPort = 5099
+  const testSecret = crypto.randomBytes(32).toString('base64url')
+  const testStaffEmail = 'staff@campusfind.test'
+  const testStaffPassword = 'CampusStaffTest2026!'
+  const testStaffHash = hashPassword(testStaffPassword)
+  const testStaffName = 'Campus Security Officer'
+  const testStaffRole = 'staff'
+  const validAuthEnv = {
+    SESSION_SECRET: testSecret,
+    STAFF_EMAIL: testStaffEmail,
+    STAFF_PASSWORD_HASH: testStaffHash,
+    STAFF_NAME: testStaffName,
+    STAFF_ROLE: testStaffRole,
+    TOKEN_EXPIRATION_SECONDS: '3600',
+    COOKIE_SECURE: 'false',
+    COOKIE_SAMESITE: 'Lax',
+  }
+
+  console.log('Testing authentication configuration and primitives...')
+  assert(validateAuthConfig(validAuthEnv).isValid, 'Strong auth configuration is accepted')
+  assert(!validateAuthConfig({ ...validAuthEnv, SESSION_SECRET: '' }).isValid, 'Missing signing secret is rejected')
+  assert(
+    !validateAuthConfig({
+      ...validAuthEnv,
+      SESSION_SECRET: 'replace_with_a_secure_random_signing_secret_at_least_32_characters_long',
+    }).isValid,
+    'Known placeholder signing secret is rejected',
+  )
+  assert(
+    !validateAuthConfig({ ...validAuthEnv, SESSION_SECRET: 'A'.repeat(64) }).isValid,
+    'Repeated-character signing secret is rejected',
+  )
+  assert(
+    !validateAuthConfig({ ...validAuthEnv, SESSION_SECRET: 'a'.repeat(32) }).isValid,
+    'Low-entropy signing secret is rejected',
+  )
+  assert(
+    !validateAuthConfig({
+      ...validAuthEnv,
+      SESSION_SECRET: 'A1b2C3d4E5f6G7h8'.repeat(3),
+    }).isValid,
+    'Repeated signing-secret patterns are rejected',
+  )
+  assert(
+    !validateAuthConfig({ ...validAuthEnv, STAFF_PASSWORD_HASH: 'scrypt$bad$hash' }).isValid,
+    'Malformed password hash is rejected',
+  )
+  assert(
+    !validateAuthConfig({ ...validAuthEnv, STAFF_PASSWORD_HASH: `scrypt$${'a'.repeat(32)}$${'b'.repeat(127)}` }).isValid,
+    'Structurally invalid password hash is rejected',
+  )
+  assert(
+    !validateAuthConfig({ ...validAuthEnv, TOKEN_EXPIRATION_SECONDS: '59' }).isValid,
+    'Token expiry below its minimum is rejected',
+  )
+  assert(
+    !validateAuthConfig({ ...validAuthEnv, TOKEN_EXPIRATION_SECONDS: '86401' }).isValid,
+    'Token expiry above its maximum is rejected',
+  )
+  assert(
+    !validateAuthConfig({ ...validAuthEnv, COOKIE_SECURE: 'sometimes' }).isValid,
+    'Invalid secure-cookie setting is rejected',
+  )
+  assert(
+    !validateAuthConfig({
+      ...validAuthEnv,
+      COOKIE_SAMESITE: 'None',
+      COOKIE_SECURE: 'false',
+    }).isValid,
+    'SameSite=None without a secure cookie is rejected',
+  )
+  assert(
+    validateAuthConfig({
+      ...validAuthEnv,
+      NODE_ENV: 'production',
+      COOKIE_SECURE: 'false',
+    }).cookieSecure,
+    'Production always forces secure cookies',
+  )
+  assert(
+    !validateAuthConfig({ ...validAuthEnv, STAFF_ROLE: 'administrator' }).isValid,
+    'Unsupported staff role configuration is rejected',
+  )
+  assert(verifyPassword(testStaffPassword, testStaffHash), 'Scrypt password hash verifies correctly')
+  assert(!verifyPassword('wrong-password', testStaffHash), 'Scrypt password hash rejects a wrong password')
+
+  const nonStaffConfig = validateAuthConfig(validAuthEnv)
+  const nonStaffSessions = new SessionManager(nonStaffConfig)
+  const nonStaffSession = nonStaffSessions.createSession({
+    email: testStaffEmail,
+    name: 'Non-staff test user',
+    role: 'viewer',
+  })
+  const protectedMiddleware = createStaffAuthMiddleware(
+    nonStaffConfig,
+    nonStaffSessions,
+    new Set(['http://localhost:5173']),
+  )
+  const roleResponse = {
+    status(code) {
+      this.statusCode = code
+      return this
+    },
+    json(body) {
+      this.body = body
+      return this
+    },
+  }
+  let roleMiddlewarePassed = false
+  protectedMiddleware(
+    {
+      headers: {
+        cookie: `campusfind_staff_token=${encodeURIComponent(nonStaffSession.token)}`,
+      },
+      method: 'GET',
+      get: () => undefined,
+    },
+    roleResponse,
+    () => {
+      roleMiddlewarePassed = true
+    },
+  )
+  assert(roleResponse.statusCode === 403, 'Authenticated non-staff role is rejected')
+  assert(!roleMiddlewarePassed, 'Non-staff request does not reach the protected handler')
 
   // TEST 1: Missing security configuration fails securely
   console.log('Testing security configuration validation (fail-secure behavior)...')
@@ -41,14 +174,6 @@ async function runTests() {
   )
 
   // TEST 2: Start server with valid test credentials
-  const testPort = 5099
-  const testSecret = 'campusfind_super_secret_test_key_at_least_32_chars_long!'
-  const testStaffEmail = 'staff@campusfind.test'
-  const testStaffPassword = 'CampusStaffTest2026!'
-  const testStaffHash = hashPassword(testStaffPassword)
-  const testStaffName = 'Campus Security Officer'
-  const testStaffRole = 'staff'
-
   const serverEnv = {
     ...process.env,
     PORT: String(testPort),
@@ -131,6 +256,21 @@ async function runTests() {
   }
 
   try {
+    const preflightRes = await request('OPTIONS', '/api/reports')
+    assert(preflightRes.status === 204, 'Allowed-origin CORS preflight returns 204')
+    assert(
+      preflightRes.headers['access-control-allow-origin'] === 'http://localhost:5173',
+      'CORS preflight echoes the configured origin',
+    )
+    assert(
+      preflightRes.headers['access-control-allow-credentials'] === 'true',
+      'CORS preflight enables credentials',
+    )
+    assert(
+      preflightRes.headers['access-control-allow-headers'].includes('X-CSRF-Token'),
+      'CORS preflight permits the CSRF request header',
+    )
+
     // 3. UNAUTHORIZED ACCESS TESTS (Protected report endpoints return 401 without cookie)
     console.log('Testing unauthorized access to protected endpoints...')
     const unauthReports = await request('GET', '/api/reports')
@@ -161,8 +301,9 @@ async function runTests() {
 
     const expiredToken = createSignedToken(
       {
-        sessionId: 'expired-session-123',
+        sessionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         email: testStaffEmail,
+        iat: Math.floor(Date.now() / 1000) - 600,
         exp: Math.floor(Date.now() / 1000) - 300,
       },
       testSecret,
@@ -187,6 +328,11 @@ async function runTests() {
     })
     assert(wrongPassLogin.status === 401, 'Incorrect password returns 401')
     assert(wrongPassLogin.body.error.code === 'INVALID_CREDENTIALS', 'Error code is INVALID_CREDENTIALS')
+    assert(
+      !JSON.stringify(wrongPassLogin.body).includes(testStaffPassword) &&
+        !JSON.stringify(wrongPassLogin.body).includes(testSecret),
+      'Credential errors do not expose the supplied password or signing secret',
+    )
 
     const wrongEmailLogin = await request('POST', '/api/auth/login', {
       email: 'intruder@campusfind.test',
@@ -213,6 +359,7 @@ async function runTests() {
     assert(cookieHeader.includes('HttpOnly'), 'Cookie has HttpOnly attribute')
     assert(cookieHeader.includes('SameSite=Lax'), 'Cookie has SameSite attribute configured')
     assert(cookieHeader.includes('Path=/'), 'Cookie has Path=/ attribute')
+    assert(cookieHeader.includes('Max-Age=3600'), 'Cookie expiry matches the configured session lifetime')
 
     const staffCookie = cookieHeader.split(';')[0]
     const csrfToken = loginRes.body.csrfToken
@@ -258,7 +405,15 @@ async function runTests() {
     assert(badOriginRes.status === 403, 'State-changing POST with untrusted Origin returns 403')
     assert(badOriginRes.body.error.code === 'ORIGIN_NOT_ALLOWED', 'Code is ORIGIN_NOT_ALLOWED')
 
-    // 9. VERIFY ALL 24 EXISTING TASK 6 TESTS UNDER AUTHENTICATED SESSION
+    const noCsrfLogout = await request(
+      'POST',
+      '/api/auth/logout',
+      null,
+      { Cookie: staffCookie },
+    )
+    assert(noCsrfLogout.status === 403, 'Logout without a CSRF token returns 403')
+
+    // 9. Preserve the existing Task 6 report-action checks under auth.
     console.log('Running Task 6 assertions with authenticated staff session...')
     const authHeaders = {
       Cookie: staffCookie,
@@ -457,6 +612,23 @@ async function runTests() {
 
     const reportsAfterLogout = await request('GET', '/api/reports', null, { Cookie: staffCookie })
     assert(reportsAfterLogout.status === 401, 'Subsequent GET /api/reports returns 401 after logout')
+
+    // 12. LOGIN RATE LIMIT
+    console.log('Testing login rate limiting...')
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const failedAttempt = await request('POST', '/api/auth/login', {
+        email: testStaffEmail,
+        password: 'IncorrectTestPassword!',
+      })
+      assert(failedAttempt.status === 401, `Failed login attempt ${attempt + 1} is rejected`)
+    }
+    const limitedLogin = await request('POST', '/api/auth/login', {
+      email: testStaffEmail,
+      password: 'IncorrectTestPassword!',
+    })
+    assert(limitedLogin.status === 429, 'Excessive login attempts return 429')
+    assert(limitedLogin.body.error.code === 'LOGIN_RATE_LIMITED', 'Rate-limit error has a stable code')
+    assert(Number(limitedLogin.headers['retry-after']) > 0, 'Rate-limit response includes Retry-After')
 
     console.log('\n========================================')
     console.log(`ALL TESTS PASSED! (${results.length} assertions)`)

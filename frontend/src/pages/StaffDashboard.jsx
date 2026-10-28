@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiBaseUrl } from '../config/api.js'
-import { mockStaffReports } from '../data/mockStaffReports.js'
 import './StaffDashboard.css'
 
 const reviewStatuses = ['Pending review', 'Approved', 'Dismissed']
@@ -28,6 +27,13 @@ function formatDate(value) {
     year: 'numeric',
     timeZone: 'UTC',
   }).format(new Date(`${value}T00:00:00Z`))
+}
+
+function getActionError(error, fallback) {
+  if (error instanceof TypeError) {
+    return 'Unable to reach the CampusFind API. The staff action was not completed.'
+  }
+  return error.message || fallback
 }
 
 function ReportDetailsDialog({
@@ -291,8 +297,7 @@ function ReportDetailsDialog({
           )}
 
           <p className="staff-dialog-note">
-            CampusFind Staff Tools · Limitation: Role-based staff authorization is not yet implemented.
-            All actions operate on demonstration data without cryptographic staff verification.
+            Staff actions update in-memory demonstration records. No student notification is sent.
           </p>
         </div>
       )}
@@ -300,9 +305,11 @@ function ReportDetailsDialog({
   )
 }
 
-function StaffDashboard() {
-  const [reports, setReports] = useState(mockStaffReports)
+function StaffDashboard({ staffUser, csrfToken, onLogout }) {
+  const [reports, setReports] = useState([])
   const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [reloadCount, setReloadCount] = useState(0)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
@@ -315,17 +322,33 @@ function StaffDashboard() {
   useEffect(() => {
     let active = true
     const fetchReports = async () => {
+      setIsLoading(true)
+      setLoadError('')
       try {
-        const response = await fetch(`${apiBaseUrl}/api/reports`)
+        const response = await fetch(`${apiBaseUrl}/api/reports`, {
+          credentials: 'include',
+        })
+        if (response.status === 401) {
+          onLogout('Your staff session has expired. Please sign in again.')
+          return
+        }
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
+          const payload = await response.json().catch(() => null)
+          throw new Error(payload?.error?.message || `Unable to load reports (HTTP ${response.status}).`)
         }
         const data = await response.json()
-        if (active && data.status === 'ok' && Array.isArray(data.reports)) {
-          setReports(data.reports)
+        if (data?.status !== 'ok' || !Array.isArray(data.reports)) {
+          throw new Error('The CampusFind API returned an invalid report list.')
         }
-      } catch {
-        // Fall back to local mock data gracefully if backend is offline
+        if (active) setReports(data.reports)
+      } catch (error) {
+        if (active) {
+          setLoadError(
+            error instanceof TypeError
+              ? 'Unable to reach the CampusFind API. Check the backend connection and retry.'
+              : error.message,
+          )
+        }
       } finally {
         if (active) setIsLoading(false)
       }
@@ -335,7 +358,7 @@ function StaffDashboard() {
     return () => {
       active = false
     }
-  }, [])
+  }, [onLogout, reloadCount])
 
   const filteredReports = useMemo(() => {
     const query = search.trim().toLocaleLowerCase()
@@ -377,9 +400,20 @@ function StaffDashboard() {
     try {
       const response = await fetch(`${apiBaseUrl}/api/reports/${encodeURIComponent(report.id)}/dismiss`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        credentials: 'include',
         body: JSON.stringify({ reason: trimmedReason }),
       })
+
+      if (response.status === 401) {
+        const msg = 'Your staff session has expired. Please sign in again.'
+        setActionError(msg)
+        onLogout(msg)
+        return
+      }
 
       const payload = await response.json().catch(() => null)
       if (!response.ok) {
@@ -387,6 +421,9 @@ function StaffDashboard() {
       }
 
       const updatedReport = payload.report
+      if (payload.status !== 'ok' || !updatedReport?.id) {
+        throw new Error('The CampusFind API did not confirm the dismissal.')
+      }
       setReports((current) => current.map((r) => (r.id === report.id ? updatedReport : r)))
       setSelectedReport(updatedReport)
       setFeedbackNotice({
@@ -395,20 +432,7 @@ function StaffDashboard() {
         message: `Report ${report.id} (${report.itemName}) has been dismissed: "${trimmedReason}".`,
       })
     } catch (err) {
-      // Local fallback if API is unreachable
-      const fallbackReport = {
-        ...report,
-        reviewStatus: 'Dismissed',
-        dismissReason: trimmedReason,
-        dismissedAt: new Date().toISOString(),
-      }
-      setReports((current) => current.map((r) => (r.id === report.id ? fallbackReport : r)))
-      setSelectedReport(fallbackReport)
-      setFeedbackNotice({
-        type: 'success',
-        title: 'Report Dismissed (Demo local state)',
-        message: `Report ${report.id} (${report.itemName}) marked dismissed: "${trimmedReason}". (${err.message})`,
-      })
+      setActionError(getActionError(err, 'Dismissal request failed.'))
     } finally {
       setIsSubmittingAction(false)
     }
@@ -424,9 +448,20 @@ function StaffDashboard() {
     try {
       const response = await fetch(`${apiBaseUrl}/api/reports/${encodeURIComponent(report.id)}/warn`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        credentials: 'include',
         body: JSON.stringify({ reason: trimmedReason }),
       })
+
+      if (response.status === 401) {
+        const msg = 'Your staff session has expired. Please sign in again.'
+        setActionError(msg)
+        onLogout(msg)
+        return
+      }
 
       const payload = await response.json().catch(() => null)
       if (!response.ok) {
@@ -434,6 +469,9 @@ function StaffDashboard() {
       }
 
       const updatedReport = payload.report
+      if (payload.status !== 'ok' || !updatedReport?.id) {
+        throw new Error('The CampusFind API did not confirm the warning.')
+      }
       setReports((current) => current.map((r) => (r.id === report.id ? updatedReport : r)))
       setSelectedReport(updatedReport)
       setFeedbackNotice({
@@ -442,20 +480,7 @@ function StaffDashboard() {
         message: `Warning issued to reporter for report ${report.id}: "${trimmedReason}".`,
       })
     } catch (err) {
-      // Local fallback if API is unreachable
-      const fallbackReport = {
-        ...report,
-        warningIssued: true,
-        warningReason: trimmedReason,
-        warnedAt: new Date().toISOString(),
-      }
-      setReports((current) => current.map((r) => (r.id === report.id ? fallbackReport : r)))
-      setSelectedReport(fallbackReport)
-      setFeedbackNotice({
-        type: 'warning',
-        title: 'Reporter Warning Issued (Demo local state)',
-        message: `Warning issued to reporter for report ${report.id}: "${trimmedReason}". (${err.message})`,
-      })
+      setActionError(getActionError(err, 'Warning request failed.'))
     } finally {
       setIsSubmittingAction(false)
     }
@@ -469,8 +494,19 @@ function StaffDashboard() {
     try {
       const response = await fetch(`${apiBaseUrl}/api/reports/${encodeURIComponent(report.id)}/approve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+        credentials: 'include',
       })
+
+      if (response.status === 401) {
+        const msg = 'Your staff session has expired. Please sign in again.'
+        setActionError(msg)
+        onLogout(msg)
+        return
+      }
 
       const payload = await response.json().catch(() => null)
       if (!response.ok) {
@@ -478,6 +514,9 @@ function StaffDashboard() {
       }
 
       const updatedReport = payload.report
+      if (payload.status !== 'ok' || !updatedReport?.id) {
+        throw new Error('The CampusFind API did not confirm the approval.')
+      }
       setReports((current) => current.map((r) => (r.id === report.id ? updatedReport : r)))
       setSelectedReport(updatedReport)
       setFeedbackNotice({
@@ -486,17 +525,7 @@ function StaffDashboard() {
         message: `Report ${report.id} (${report.itemName}) has been approved and verified.`,
       })
     } catch (err) {
-      const fallbackReport = {
-        ...report,
-        reviewStatus: 'Approved',
-      }
-      setReports((current) => current.map((r) => (r.id === report.id ? fallbackReport : r)))
-      setSelectedReport(fallbackReport)
-      setFeedbackNotice({
-        type: 'success',
-        title: 'Report Approved (Demo local state)',
-        message: `Report ${report.id} marked approved. (${err.message})`,
-      })
+      setActionError(getActionError(err, 'Approval request failed.'))
     } finally {
       setIsSubmittingAction(false)
     }
@@ -518,7 +547,9 @@ function StaffDashboard() {
             Review campus lost-and-found reports, dismiss unneeded records, and issue warnings for inappropriate submissions.
           </p>
         </div>
-        <span className="staff-demo-label">Demo dashboard · no staff authorization enforced</span>
+        <span className="staff-demo-label">
+          Signed in as {staffUser?.name || staffUser?.email || 'Campus staff'}
+        </span>
       </section>
 
       <section className="staff-summary" aria-label="Report summary">
@@ -624,7 +655,23 @@ function StaffDashboard() {
           </button>
         </div>
 
-        {filteredReports.length > 0 ? (
+        {isLoading ? (
+          <div className="staff-load-state" role="status" aria-live="polite">
+            Loading staff reports…
+          </div>
+        ) : loadError ? (
+          <div className="staff-load-error" role="alert">
+            <h3>Reports could not be loaded</h3>
+            <p>{loadError}</p>
+            <button
+              className="staff-view-button"
+              type="button"
+              onClick={() => setReloadCount((count) => count + 1)}
+            >
+              Retry
+            </button>
+          </div>
+        ) : filteredReports.length > 0 ? (
           <div className="staff-table-wrap">
             <table className="staff-reports-table">
               <thead>
@@ -696,8 +743,7 @@ function StaffDashboard() {
       </section>
 
       <p className="staff-data-note">
-        Staff action endpoints (dismiss, warn, approve) operate in demonstration mode.
-        Full role-based staff authorization and database persistence are pending future production integration.
+        Staff actions require an authenticated staff session. Report data and action history remain in backend memory and reset when the server restarts.
       </p>
 
       <ReportDetailsDialog

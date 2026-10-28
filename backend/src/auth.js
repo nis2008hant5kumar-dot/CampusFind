@@ -1,5 +1,20 @@
 const crypto = require('crypto')
 
+const scryptSaltLength = 16
+const scryptKeyLength = 64
+const scryptOptions = { N: 16384, r: 8, p: 1 }
+const minimumTokenExpirationSeconds = 60
+const maximumTokenExpirationSeconds = 86400
+
+function hasShortRepeatingPattern(value) {
+  for (let size = 1; size <= Math.min(16, Math.floor(value.length / 2)); size += 1) {
+    if (value.length % size !== 0) continue
+    const pattern = value.slice(0, size)
+    if (pattern.repeat(value.length / size) === value) return true
+  }
+  return false
+}
+
 /**
  * Hash a plain-text password using scrypt with a cryptographically secure random salt.
  * Output format: scrypt$<salt_hex>$<derived_key_hex>
@@ -8,8 +23,8 @@ function hashPassword(password) {
   if (typeof password !== 'string' || !password) {
     throw new Error('Password must be a non-empty string.')
   }
-  const salt = crypto.randomBytes(16).toString('hex')
-  const derivedKey = crypto.scryptSync(password, salt, 64)
+  const salt = crypto.randomBytes(scryptSaltLength).toString('hex')
+  const derivedKey = crypto.scryptSync(password, salt, scryptKeyLength, scryptOptions)
   return `scrypt$${salt}$${derivedKey.toString('hex')}`
 }
 
@@ -20,22 +35,13 @@ function verifyPassword(password, storedHash) {
   if (typeof password !== 'string' || typeof storedHash !== 'string') {
     return false
   }
-  if (!storedHash.startsWith('scrypt$')) {
+  const match = /^scrypt\$([a-f0-9]{32})\$([a-f0-9]{128})$/i.exec(storedHash)
+  if (!match) {
     return false
   }
-  const parts = storedHash.split('$')
-  if (parts.length !== 3) {
-    return false
-  }
-  const [, salt, expectedHex] = parts
-  if (!salt || !expectedHex) {
-    return false
-  }
+  const [, salt, expectedHex] = match
   const expectedBuffer = Buffer.from(expectedHex, 'hex')
-  if (expectedBuffer.length !== 64) {
-    return false
-  }
-  const actualBuffer = crypto.scryptSync(password, salt, 64)
+  const actualBuffer = crypto.scryptSync(password, salt, scryptKeyLength, scryptOptions)
   return crypto.timingSafeEqual(expectedBuffer, actualBuffer)
 }
 
@@ -62,7 +68,7 @@ function createSignedToken(payload, secret) {
  * Verify a signed token signature and expiration in constant time.
  */
 function verifySignedToken(token, secret) {
-  if (typeof token !== 'string' || !token) return null
+  if (typeof token !== 'string' || !token || token.length > 4096) return null
   const parts = token.split('.')
   if (parts.length !== 3) return null
   const [header, body, signature] = parts
@@ -74,9 +80,23 @@ function verifySignedToken(token, secret) {
     return null
   }
   try {
+    const parsedHeader = JSON.parse(base64UrlDecode(header))
+    if (parsedHeader.alg !== 'HS256' || parsedHeader.typ !== 'JWT') {
+      return null
+    }
     const payload = JSON.parse(base64UrlDecode(body))
     const now = Math.floor(Date.now() / 1000)
-    if (payload.exp && now > payload.exp) {
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      typeof payload.sessionId !== 'string' ||
+      !/^[a-f0-9]{48}$/i.test(payload.sessionId) ||
+      !Number.isInteger(payload.iat) ||
+      !Number.isInteger(payload.exp) ||
+      payload.iat > now + 60 ||
+      payload.exp <= now ||
+      payload.exp <= payload.iat
+    ) {
       return null
     }
     return payload
@@ -115,23 +135,74 @@ function validateAuthConfig(env = process.env) {
   const sessionSecret = env.SESSION_SECRET ? env.SESSION_SECRET.trim() : ''
   const staffEmail = env.STAFF_EMAIL ? env.STAFF_EMAIL.trim().toLowerCase() : ''
   const staffPasswordHash = env.STAFF_PASSWORD_HASH ? env.STAFF_PASSWORD_HASH.trim() : ''
+  const secretCharacterCounts = [...sessionSecret].reduce((counts, character) => {
+    counts[character] = (counts[character] || 0) + 1
+    return counts
+  }, Object.create(null))
+  const secretEntropy = sessionSecret.length > 0
+    ? Object.values(secretCharacterCounts).reduce((entropy, count) => {
+      const probability = count / sessionSecret.length
+      return entropy - probability * Math.log2(probability)
+    }, 0) * sessionSecret.length
+    : 0
+  const knownPlaceholder = /replace[_ -]?with|change[_ -]?me|placeholder|example|your[_ -]?secret|default/i
+    .test(sessionSecret)
 
-  if (!sessionSecret || sessionSecret.length < 32) {
-    errors.push('SESSION_SECRET must be configured with at least 32 characters.')
-  }
-  if (!staffPasswordHash || !staffPasswordHash.startsWith('scrypt$')) {
+  if (
+    sessionSecret.length < 32 ||
+    knownPlaceholder ||
+    hasShortRepeatingPattern(sessionSecret) ||
+    Object.keys(secretCharacterCounts).length < 16 ||
+    secretEntropy < 128
+  ) {
     errors.push(
-      'STAFF_PASSWORD_HASH must be configured with a valid scrypt salted hash (format: scrypt$<salt>$<hash>).',
+      'SESSION_SECRET must be a high-entropy random value of at least 32 characters; do not use a placeholder.',
+    )
+  }
+  if (!/^scrypt\$[a-f0-9]{32}\$[a-f0-9]{128}$/i.test(staffPasswordHash)) {
+    errors.push(
+      'STAFF_PASSWORD_HASH must be a valid scrypt hash with a 16-byte salt and 64-byte derived key.',
     )
   }
   if (!staffEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(staffEmail)) {
     errors.push('STAFF_EMAIL must be configured with a valid email address.')
   }
 
-  const tokenExpSeconds = Number(env.TOKEN_EXPIRATION_SECONDS) || 3600
+  const tokenExpSeconds = env.TOKEN_EXPIRATION_SECONDS === undefined
+    ? 3600
+    : Number(env.TOKEN_EXPIRATION_SECONDS)
+  if (
+    !Number.isInteger(tokenExpSeconds) ||
+    tokenExpSeconds < minimumTokenExpirationSeconds ||
+    tokenExpSeconds > maximumTokenExpirationSeconds
+  ) {
+    errors.push(
+      `TOKEN_EXPIRATION_SECONDS must be an integer between ${minimumTokenExpirationSeconds} and ${maximumTokenExpirationSeconds}.`,
+    )
+  }
+
   const isProd = env.NODE_ENV === 'production'
-  const cookieSecure = env.COOKIE_SECURE === 'true' || isProd
-  const cookieSameSite = env.COOKIE_SAMESITE || (isProd ? 'Strict' : 'Lax')
+  const secureSetting = env.COOKIE_SECURE === undefined
+    ? (isProd ? 'true' : 'false')
+    : String(env.COOKIE_SECURE).toLowerCase()
+  if (!['true', 'false'].includes(secureSetting)) {
+    errors.push('COOKIE_SECURE must be either true or false.')
+  }
+  const cookieSecure = secureSetting === 'true' || isProd
+  const sameSiteSetting = env.COOKIE_SAMESITE === undefined
+    ? (isProd ? 'Strict' : 'Lax')
+    : String(env.COOKIE_SAMESITE).toLowerCase()
+  const sameSiteValues = { lax: 'Lax', strict: 'Strict', none: 'None' }
+  const cookieSameSite = sameSiteValues[sameSiteSetting]
+  if (!cookieSameSite) {
+    errors.push('COOKIE_SAMESITE must be Lax, Strict, or None.')
+  } else if (cookieSameSite === 'None' && !cookieSecure) {
+    errors.push('COOKIE_SAMESITE=None requires COOKIE_SECURE=true.')
+  }
+  const staffRole = env.STAFF_ROLE ? env.STAFF_ROLE.trim() : 'staff'
+  if (staffRole !== 'staff') {
+    errors.push('STAFF_ROLE must be staff for this local staff account.')
+  }
 
   return {
     isValid: errors.length === 0,
@@ -140,7 +211,7 @@ function validateAuthConfig(env = process.env) {
     staffEmail,
     staffPasswordHash,
     staffName: env.STAFF_NAME ? env.STAFF_NAME.trim() : 'Campus Safety Staff',
-    staffRole: env.STAFF_ROLE ? env.STAFF_ROLE.trim() : 'staff',
+    staffRole,
     tokenExpSeconds,
     cookieSecure,
     cookieSameSite,
@@ -192,7 +263,7 @@ class SessionManager {
     if (!sessionId || !this.sessions.has(sessionId)) return null
     const session = this.sessions.get(sessionId)
     const now = Math.floor(Date.now() / 1000)
-    if (session.exp < now) {
+    if (session.exp <= now) {
       this.sessions.delete(sessionId)
       return null
     }
@@ -250,11 +321,26 @@ function createStaffAuthMiddleware(authConfig, sessionManager, allowedFrontendOr
       })
     }
 
+    if (
+      payload.exp !== session.exp ||
+      payload.role !== session.role ||
+      payload.email !== session.email ||
+      session.role !== 'staff'
+    ) {
+      return response.status(403).json({
+        status: 'error',
+        error: {
+          code: 'FORBIDDEN',
+          message: 'A staff role is required to access this resource.',
+        },
+      })
+    }
+
     // CSRF and Origin checks for state-changing HTTP methods
     const isStateChanging = ['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method)
     if (isStateChanging) {
       const origin = request.get('Origin')
-      if (origin && !allowedFrontendOrigins.has(origin)) {
+      if (!origin || !allowedFrontendOrigins.has(origin)) {
         return response.status(403).json({
           status: 'error',
           error: {
@@ -288,6 +374,50 @@ function createStaffAuthMiddleware(authConfig, sessionManager, allowedFrontendOr
   }
 }
 
+function createLoginRateLimiter({ limit = 10, windowMs = 15 * 60 * 1000 } = {}) {
+  const attempts = new Map()
+
+  const middleware = (request, response, next) => {
+    const now = Date.now()
+    const key = request.socket?.remoteAddress || 'unknown'
+    let entry = attempts.get(key)
+
+    if (!entry || now - entry.startedAt >= windowMs) {
+      entry = { count: 0, startedAt: now }
+      attempts.set(key, entry)
+    }
+
+    if (entry.count >= limit) {
+      const retryAfterSeconds = Math.max(
+        1,
+        Math.ceil((windowMs - (now - entry.startedAt)) / 1000),
+      )
+      response.set('Retry-After', String(retryAfterSeconds))
+      return response.status(429).json({
+        status: 'error',
+        error: {
+          code: 'LOGIN_RATE_LIMITED',
+          message: 'Too many sign-in attempts. Please wait before trying again.',
+        },
+      })
+    }
+
+    entry.count += 1
+    if (attempts.size > 1000) {
+      for (const [address, value] of attempts) {
+        if (now - value.startedAt >= windowMs) attempts.delete(address)
+      }
+    }
+    return next()
+  }
+
+  middleware.clear = (request) => {
+    attempts.delete(request.socket?.remoteAddress || 'unknown')
+  }
+
+  return middleware
+}
+
 module.exports = {
   hashPassword,
   verifyPassword,
@@ -297,4 +427,5 @@ module.exports = {
   validateAuthConfig,
   SessionManager,
   createStaffAuthMiddleware,
+  createLoginRateLimiter,
 }

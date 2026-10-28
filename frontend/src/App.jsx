@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import campusImage from './assets/lpu-campus.png'
+import { apiBaseUrl } from './config/api.js'
 import BrowseItems from './pages/BrowseItems.jsx'
 import ReportItem from './pages/ReportItem.jsx'
+import StaffLogin from './pages/StaffLogin.jsx'
 import StaffDashboard from './pages/StaffDashboard.jsx'
 import './App.css'
 
@@ -154,35 +156,148 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const [currentPath, setCurrentPath] = useState(window.location.pathname)
+  const [authStatus, setAuthStatus] = useState('checking')
+  const [staffUser, setStaffUser] = useState(null)
+  const [csrfToken, setCsrfToken] = useState('')
+  const [authNotice, setAuthNotice] = useState('')
+  const authCheckController = useRef(null)
   const isBrowsePage = currentPath === '/browse'
   const isReportPage = currentPath === '/report'
   const isStaffPage = currentPath === '/staff'
-  const isHomePage = !isBrowsePage && !isReportPage && !isStaffPage
+  const isStaffLoginPage = currentPath === '/staff/login'
+  const isHomePage = !isBrowsePage && !isReportPage && !isStaffPage && !isStaffLoginPage
 
-  useEffect(() => {
-    const handlePopState = () => {
-      setCurrentPath(window.location.pathname)
-      setMenuOpen(false)
-    }
-
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-  }, [])
-
-  const navigateTo = (event, path) => {
-    event.preventDefault()
+  function setPath(path, replace = false) {
     if (window.location.pathname !== path) {
-      window.history.pushState({}, '', path)
-      setCurrentPath(window.location.pathname)
+      if (replace) window.history.replaceState({}, '', path)
+      else window.history.pushState({}, '', path)
+      setCurrentPath(path)
       window.scrollTo(0, 0)
     }
     setMenuOpen(false)
   }
 
-  const showDemoNotice = (feature) => {
-    setNotice(`${feature} is a demo placeholder and is not connected yet.`)
-    setMenuOpen(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    authCheckController.current = controller
+
+    const checkSession = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/auth/me`, {
+          credentials: 'include',
+          signal: controller.signal,
+        })
+        if (response.status === 401) {
+          if (window.location.pathname === '/staff') {
+            setAuthNotice('Please sign in with an authorized staff account.')
+            setPath('/staff/login', true)
+          }
+          setAuthStatus('unauthenticated')
+          return
+        }
+        if (!response.ok) {
+          throw new Error(`Session check failed (HTTP ${response.status}).`)
+        }
+
+        const payload = await response.json()
+        if (
+          payload?.status !== 'ok' ||
+          payload.user?.role !== 'staff' ||
+          typeof payload.csrfToken !== 'string' ||
+          !payload.csrfToken
+        ) {
+          setAuthStatus('unauthenticated')
+          setAuthNotice('The server did not confirm an authorized staff session.')
+          return
+        }
+        setStaffUser(payload.user)
+        setCsrfToken(payload.csrfToken)
+        setAuthStatus('authenticated')
+        if (window.location.pathname === '/staff/login') {
+          setPath('/staff', true)
+        }
+      } catch (error) {
+        if (error.name === 'AbortError') return
+        setAuthStatus('unavailable')
+        if (window.location.pathname === '/staff') {
+          setPath('/staff/login', true)
+        }
+        setAuthNotice(
+          error instanceof TypeError
+            ? 'Unable to verify a staff session. Check that the backend is running.'
+            : error.message,
+        )
+      }
+    }
+
+    checkSession()
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname
+      if (path === '/staff' && authStatus !== 'authenticated') {
+        window.history.replaceState({}, '', '/staff/login')
+        setCurrentPath('/staff/login')
+        setAuthNotice('Please sign in with an authorized staff account.')
+      } else if (path === '/staff/login' && authStatus === 'authenticated') {
+        window.history.replaceState({}, '', '/staff')
+        setCurrentPath('/staff')
+      } else {
+        setCurrentPath(path)
+      }
+      setMenuOpen(false)
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [authStatus])
+
+  const navigateTo = (event, path) => {
+    event.preventDefault()
+    if (path === '/staff' && authStatus !== 'authenticated') {
+      setAuthNotice('')
+      setPath('/staff/login')
+    } else {
+      setPath(path)
+    }
   }
+
+  const handleLoginSuccess = (user, token) => {
+    if (user?.role !== 'staff' || typeof token !== 'string' || !token) {
+      setAuthStatus('unauthenticated')
+      setAuthNotice('The server did not confirm an authorized staff session.')
+      return
+    }
+    authCheckController.current?.abort()
+    setStaffUser(user)
+    setCsrfToken(token)
+    setAuthStatus('authenticated')
+    setAuthNotice('')
+    setPath('/staff')
+  }
+
+  const handleLogout = useCallback(async (message = '') => {
+    let logoutWarning = ''
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/auth/logout`, {
+        method: 'POST',
+        headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {},
+        credentials: 'include',
+      })
+      if (!response.ok) {
+        logoutWarning = 'The server could not confirm session revocation. Please try signing out again when it is available.'
+      }
+    } catch {
+      logoutWarning = 'The server could not be reached to revoke the session. Please try signing out again when it is available.'
+    }
+    setStaffUser(null)
+    setCsrfToken('')
+    setAuthStatus('unauthenticated')
+    setAuthNotice(message || logoutWarning || 'You have signed out.')
+    setPath('/staff/login')
+  }, [csrfToken])
 
   const closeMenu = () => setMenuOpen(false)
 
@@ -238,12 +353,12 @@ function App() {
               Browse Items
             </a>
             <a
-              className={`nav-link staff-demo-link${isStaffPage ? ' is-current' : ''}`}
+              className={`nav-link staff-demo-link${isStaffPage || isStaffLoginPage ? ' is-current' : ''}`}
               href="/staff"
-              aria-current={isStaffPage ? 'page' : undefined}
+              aria-current={isStaffPage || isStaffLoginPage ? 'page' : undefined}
               onClick={(event) => navigateTo(event, '/staff')}
             >
-              Staff dashboard (demo)
+              Staff dashboard
             </a>
             <a
               className="nav-link"
@@ -252,13 +367,26 @@ function App() {
             >
               How It Works
             </a>
-            <button
-              className="button button-quiet nav-sign-in"
-              type="button"
-              onClick={() => showDemoNotice('Sign in')}
-            >
-              Sign In
-            </button>
+            {authStatus === 'authenticated' ? (
+              <button
+                className="button button-quiet nav-sign-in"
+                type="button"
+                onClick={() => handleLogout()}
+              >
+                Sign out
+              </button>
+            ) : (
+              <button
+                className="button button-quiet nav-sign-in"
+                type="button"
+                onClick={() => {
+                  setAuthNotice('')
+                  setPath('/staff/login')
+                }}
+              >
+                Staff sign in
+              </button>
+            )}
             <a
               className={`button button-dark nav-report${isReportPage ? ' is-current' : ''}`}
               href="/report"
@@ -292,7 +420,23 @@ function App() {
         ) : isReportPage ? (
           <ReportItem onCancel={(event) => navigateTo(event, '/browse')} />
         ) : isStaffPage ? (
-          <StaffDashboard />
+          authStatus === 'authenticated' ? (
+            <StaffDashboard
+              staffUser={staffUser}
+              csrfToken={csrfToken}
+              onLogout={handleLogout}
+            />
+          ) : (
+            <div className="staff-auth-loading" role="status" aria-live="polite">
+              Checking staff session…
+            </div>
+          )
+        ) : isStaffLoginPage ? (
+          <StaffLogin
+            onLoginSuccess={handleLoginSuccess}
+            onCancel={(event) => navigateTo(event, '/')}
+            notice={authNotice}
+          />
         ) : (
           <>
         <section className="hero-section" id="home" aria-labelledby="hero-heading">

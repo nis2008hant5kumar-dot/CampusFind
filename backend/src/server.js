@@ -19,6 +19,7 @@ const {
   validateAuthConfig,
   SessionManager,
   createStaffAuthMiddleware,
+  createLoginRateLimiter,
   verifyPassword,
   parseCookies,
   verifySignedToken,
@@ -57,6 +58,7 @@ const requireStaffAuth = createStaffAuthMiddleware(
   sessionManager,
   allowedFrontendOrigins,
 )
+const loginRateLimiter = createLoginRateLimiter()
 
 const cookieOptions = {
   httpOnly: true,
@@ -259,7 +261,7 @@ app.post('/api/items', (request, response) => {
   Server restart invalidates active sessions, requiring staff re-authentication.
 */
 
-app.post('/api/auth/login', (request, response) => {
+app.post('/api/auth/login', loginRateLimiter, (request, response) => {
   const body = request.body || {}
   const errors = Object.create(null)
 
@@ -311,6 +313,7 @@ app.post('/api/auth/login', (request, response) => {
     role: authConfig.staffRole,
   }
   const { token, csrfToken } = sessionManager.createSession(user)
+  loginRateLimiter.clear(request)
 
   response.cookie('campusfind_staff_token', token, cookieOptions)
 
@@ -322,7 +325,7 @@ app.post('/api/auth/login', (request, response) => {
   })
 })
 
-app.post('/api/auth/logout', (request, response) => {
+app.post('/api/auth/logout', requireStaffAuth, (request, response) => {
   const cookies = parseCookies(request.headers.cookie)
   const token = cookies.campusfind_staff_token
   if (token) {
